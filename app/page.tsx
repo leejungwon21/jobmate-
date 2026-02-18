@@ -206,7 +206,6 @@ export default function Home() {
       if (result) setApps(p => p.map(a => a.id === editing ? result : a))
     } else {
       const result = await db.createApplication({
-        user_id: 'default',
         company: form.company, position: form.position, stage: form.stage,
         deadline: form.deadline || null, interview_date: form.interview_date || null,
         interview_time: form.interview_time || null, url: form.url || null,
