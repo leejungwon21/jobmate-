@@ -273,6 +273,16 @@ export default function Home() {
     ...apps.filter(a => a.interview_date && (daysUntil(a.interview_date) ?? -1) >= 0).map(a => ({ ...a, et: 'interview' as const, ed: a.interview_date! })),
   ].sort((a,b) => new Date(a.ed).getTime() - new Date(b.ed).getTime()), [apps])
 
+  const weekEvents = useMemo(() => {
+    const now = new Date(); now.setHours(0,0,0,0)
+    const eow = new Date(now); eow.setDate(now.getDate() + (7 - now.getDay()))
+    const inWeek = (ds: string) => { const d = new Date(ds); d.setHours(0,0,0,0); return d >= now && d <= eow }
+    return [
+      ...apps.filter(a => a.deadline && inWeek(a.deadline)).map(a => ({ ...a, et: 'deadline' as const, ed: a.deadline! })),
+      ...apps.filter(a => a.interview_date && inWeek(a.interview_date)).map(a => ({ ...a, et: 'interview' as const, ed: a.interview_date! })),
+    ].sort((a, b) => new Date(a.ed).getTime() - new Date(b.ed).getTime())
+  }, [apps])
+
   /* ── Loading state ── */
   if (loading) return (
     <div style={{ display:'grid',placeItems:'center',minHeight:'100vh',background:'#F7F7FA' }}>
@@ -363,37 +373,28 @@ export default function Home() {
           )}
 
           {/* 이번 주 할 일 */}
-          {(()=>{
-            const now=new Date();now.setHours(0,0,0,0)
-            const endOfWeek=new Date(now);endOfWeek.setDate(now.getDate()+(7-now.getDay()))
-            const weekEvents=[
-              ...apps.filter(a=>a.deadline&&(()=>{const d=new Date(a.deadline);d.setHours(0,0,0,0);return d>=now&&d<=endOfWeek})()).map(a=>({...a,et:'deadline' as const,ed:a.deadline!})),
-              ...apps.filter(a=>a.interview_date&&(()=>{const d=new Date(a.interview_date);d.setHours(0,0,0,0);return d>=now&&d<=endOfWeek})()).map(a=>({...a,et:'interview' as const,ed:a.interview_date!})),
-            ].sort((a,b)=>new Date(a.ed).getTime()-new Date(b.ed).getTime())
-            if(weekEvents.length===0) return null
-            return (
-              <Card style={{ padding:'18px 20px',marginBottom:'12px' }}>
-                <div style={{ display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'14px' }}>
-                  <div style={{ fontSize:'13px',fontWeight:700 }}>📋 이번 주 할 일</div>
-                  <span style={{ fontSize:'11px',color:'#8E8E93',fontWeight:600 }}>{weekEvents.length}건</span>
-                </div>
-                {weekEvents.map((ev,i)=>{
-                  const d=daysUntil(ev.ed)!
-                  const isI=ev.et==='interview'
-                  return (
-                    <div key={ev.id+ev.et} onClick={()=>setShowDetail(apps.find(a=>a.id===ev.id)!)} style={{ display:'flex',alignItems:'center',gap:'12px',padding:'10px 0',borderTop:i?'1px solid #F5F5F5':'none',cursor:'pointer' }}>
-                      <div style={{ width:36,height:36,borderRadius:'10px',flexShrink:0,background:isI?'#FFF3E0':'#E6F9EE',display:'grid',placeItems:'center',fontSize:'14px' }}>{isI?'🎤':'📮'}</div>
-                      <div style={{ flex:1 }}>
-                        <div style={{ fontSize:'13px',fontWeight:700 }}>{ev.company}</div>
-                        <div style={{ fontSize:'11px',color:'#8E8E93',marginTop:'2px' }}>{isI?`면접 ${ev.interview_time||''}`:'서류 마감'} · {fmt(ev.ed)}</div>
-                      </div>
-                      <div style={{ padding:'4px 8px',borderRadius:'6px',fontSize:'11px',fontWeight:800,color:d<=1?'#FF3B30':d<=3?'#FF6F00':'#8E8E93',background:d<=1?'#FFEBEE':d<=3?'#FFF3E0':'#F2F2F7' }}>{d===0?'오늘':d===1?'내일':`D-${d}`}</div>
+          {weekEvents.length>0&&(
+            <Card style={{ padding:'18px 20px',marginBottom:'12px' }}>
+              <div style={{ display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'14px' }}>
+                <div style={{ fontSize:'13px',fontWeight:700 }}>📋 이번 주 할 일</div>
+                <span style={{ fontSize:'11px',color:'#8E8E93',fontWeight:600 }}>{weekEvents.length}건</span>
+              </div>
+              {weekEvents.map((ev,i)=>{
+                const d=daysUntil(ev.ed)!
+                const isI=ev.et==='interview'
+                return (
+                  <div key={ev.id+ev.et} onClick={()=>setShowDetail(apps.find(a=>a.id===ev.id)!)} style={{ display:'flex',alignItems:'center',gap:'12px',padding:'10px 0',borderTop:i?'1px solid #F5F5F5':'none',cursor:'pointer' }}>
+                    <div style={{ width:36,height:36,borderRadius:'10px',flexShrink:0,background:isI?'#FFF3E0':'#E6F9EE',display:'grid',placeItems:'center',fontSize:'14px' }}>{isI?'🎤':'📮'}</div>
+                    <div style={{ flex:1 }}>
+                      <div style={{ fontSize:'13px',fontWeight:700 }}>{ev.company}</div>
+                      <div style={{ fontSize:'11px',color:'#8E8E93',marginTop:'2px' }}>{isI?`면접 ${ev.interview_time||''}`:'서류 마감'} · {fmt(ev.ed)}</div>
                     </div>
-                  )
-                })}
-              </Card>
-            )
-          })()}
+                    <div style={{ padding:'4px 8px',borderRadius:'6px',fontSize:'11px',fontWeight:800,color:d<=1?'#FF3B30':d<=3?'#FF6F00':'#8E8E93',background:d<=1?'#FFEBEE':d<=3?'#FFF3E0':'#F2F2F7' }}>{d===0?'오늘':d===1?'내일':`D-${d}`}</div>
+                  </div>
+                )
+              })}
+            </Card>
+          )}
 
           {/* 다가오는 면접 */}
           {upcoming.length>0&&(
@@ -456,4 +457,182 @@ export default function Home() {
         </div>
       )}
 
-      
+      {/* ═══ APPLICATIONS ═══ */}
+      {tab==='applications'&&(
+        <div style={{ padding:'16px 16px 0',animation:'si .25s ease' }}>
+          <div style={{ display:'flex',gap:'6px',marginBottom:'12px',overflowX:'auto',scrollbarWidth:'none' as any,padding:'0 0 4px' }}>
+            {[{id:'all',label:`전체 ${total}`},...STAGES.map(s=>({id:s.id,label:`${s.label} ${apps.filter(a=>a.stage===s.id).length}`}))].map(f=>(
+              <button key={f.id} onClick={()=>setFilter(f.id)} style={{ padding:'7px 14px',borderRadius:'20px',fontSize:'12px',fontWeight:600,cursor:'pointer',whiteSpace:'nowrap',fontFamily:'inherit',border:filter===f.id?`1.5px solid ${G}`:'1.5px solid #E8E8E8',background:filter===f.id?'#E6F9EE':'#FFF',color:filter===f.id?G:'#8E8E93' }}>{f.label}</button>
+            ))}
+          </div>
+          {filtered.length===0?<Empty icon="📋" title="지원 내역이 없어요" sub="새 지원을 추가해보세요"/>:
+            <Card style={{ overflow:'hidden' }}>
+              {filtered.map((a,i)=>(
+                <div key={a.id} onClick={()=>setShowDetail(a)} style={{ padding:'16px 20px',borderTop:i?'1px solid #F5F5F5':'none',cursor:'pointer',transition:'background .1s' }}>
+                  <div style={{ display:'flex',justifyContent:'space-between',alignItems:'flex-start',marginBottom:'8px' }}>
+                    <div><div style={{ fontSize:'15px',fontWeight:700,letterSpacing:'-.3px' }}>{a.company}</div><div style={{ fontSize:'12px',color:'#8E8E93',marginTop:'3px' }}>{a.position}</div></div>
+                    <Badge stageId={a.stage}/>
+                  </div>
+                  <div style={{ display:'flex',gap:'12px',fontSize:'11px',color:'#C7C7CC' }}>
+                    {a.deadline&&<span>마감 {fmt(a.deadline)}</span>}
+                    {a.interview_date&&<span>면접 {fmt(a.interview_date)}</span>}
+                    {a.cover_letter?.length>0&&<span>자소서 {a.cover_letter.length}문항</span>}
+                  </div>
+                </div>
+              ))}
+            </Card>
+          }
+        </div>
+      )}
+
+      {/* ═══ CALENDAR ═══ */}
+      {tab==='calendar'&&(
+        <div style={{ padding:'16px 16px 0',animation:'si .25s ease' }}>
+          <Cal applications={apps} selectedDate={selCal} onSelectDate={d=>setSelCal(d===selCal?null:d)}/>
+          {selCal&&calEvts.length>0&&(
+            <Card style={{ padding:'16px 20px',marginBottom:'12px' }}>
+              <div style={{ fontSize:'13px',fontWeight:700,marginBottom:'12px' }}>{fmt(selCal)}</div>
+              {calEvts.map((ev,i)=>(
+                <div key={ev.id+ev.et} onClick={()=>setShowDetail(apps.find(a=>a.id===ev.id)!)} style={{ display:'flex',alignItems:'center',gap:'12px',padding:'10px 0',borderTop:i?'1px solid #F5F5F5':'none',cursor:'pointer' }}>
+                  <div style={{ width:36,height:36,borderRadius:'10px',flexShrink:0,background:ev.et==='interview'?'#FFF3E0':'#E6F9EE',display:'grid',placeItems:'center',fontSize:'15px' }}>{ev.et==='interview'?'🎤':'📮'}</div>
+                  <div><div style={{ fontSize:'13px',fontWeight:700 }}>{ev.company}</div><div style={{ fontSize:'11px',color:'#8E8E93',marginTop:'2px' }}>{ev.et==='interview'?`면접 ${ev.interview_time||''}`:'서류 마감'} · {ev.position}</div></div>
+                </div>
+              ))}
+            </Card>
+          )}
+          {selCal&&calEvts.length===0&&<div style={{ textAlign:'center',padding:'20px 0',color:'#C7C7CC',fontSize:'13px' }}>이 날에는 일정이 없어요</div>}
+          <div style={{ fontSize:'13px',fontWeight:700,marginBottom:'12px',padding:'0 4px' }}>전체 일정</div>
+          {allEvts.length===0?<Empty icon="📅" title="예정된 일정이 없어요" sub="지원을 추가하면 일정이 표시됩니다"/>:
+            allEvts.map((ev,i)=>{
+              const d=daysUntil(ev.ed)!, isI=ev.et==='interview'
+              return (
+                <div key={ev.id+ev.et} onClick={()=>setShowDetail(apps.find(a=>a.id===ev.id)!)} style={{ display:'flex',gap:'10px',marginBottom:'8px',cursor:'pointer' }}>
+                  <div style={{ width:46,minWidth:46,textAlign:'center',padding:'8px 0',borderRadius:'12px',background:isI?'#FFF3E0':'#E6F9EE' }}>
+                    <div style={{ fontSize:'17px',fontWeight:800,color:isI?'#FF6F00':G }}>{new Date(ev.ed).getDate()}</div>
+                    <div style={{ fontSize:'9px',color:'#8E8E93',fontWeight:600 }}>{new Date(ev.ed).getMonth()+1}월</div>
+                  </div>
+                  <Card style={{ flex:1,padding:'10px 14px',display:'flex',justifyContent:'space-between',alignItems:'center' }}>
+                    <div><div style={{ fontSize:'13px',fontWeight:700 }}>{ev.company}</div><div style={{ fontSize:'11px',color:'#8E8E93',marginTop:'2px' }}>{isI?`면접 ${ev.interview_time||''}`:'서류 마감'}</div></div>
+                    <span style={{ fontSize:'11px',fontWeight:800,color:d<=3?'#FF3B30':'#8E8E93' }}>{d===0?'오늘':`D-${d}`}</span>
+                  </Card>
+                </div>
+              )
+            })
+          }
+        </div>
+      )}
+
+      {/* ═══ LIBRARY ═══ */}
+      {tab==='library'&&(
+        <div style={{ padding:'16px 16px 0',animation:'si .25s ease' }}>
+          <div style={{ display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'12px',padding:'0 4px' }}>
+            <div style={{ fontSize:'15px',fontWeight:700 }}>자소서 보관함</div>
+            <BtnG onClick={()=>setShowAddAns(true)} sm>+ 추가</BtnG>
+          </div>
+          <Card style={{ padding:'16px 20px',marginBottom:'12px' }}>
+            <div style={{ fontSize:'11px',fontWeight:700,color:'#8E8E93',marginBottom:'10px' }}>자주 나오는 문항</div>
+            <div style={{ display:'flex',flexWrap:'wrap',gap:'6px' }}>
+              {SAMPLE_Q.map((q,i)=>(<button key={i} onClick={()=>{setAf({question:q,answer:'',tags:''});setShowAddAns(true)}} style={{ padding:'7px 12px',borderRadius:'20px',border:'1px solid #E8E8E8',background:'#FFF',fontSize:'11px',color:'#666',cursor:'pointer',fontFamily:'inherit' }}>{q.length>14?q.slice(0,14)+'…':q}</button>))}
+            </div>
+          </Card>
+          {saved.length===0?<Empty icon="✍️" title="저장된 자소서가 없어요" sub="자주 쓰는 답변을 미리 저장해두세요"/>:
+            <Card style={{ overflow:'hidden' }}>
+              {saved.map((ans,i)=>(
+                <div key={ans.id} onClick={()=>setShowAnsDetail(ans)} style={{ padding:'16px 20px',borderTop:i?'1px solid #F5F5F5':'none',cursor:'pointer' }}>
+                  <div style={{ fontSize:'14px',fontWeight:700,marginBottom:'6px' }}>{ans.question}</div>
+                  <div style={{ fontSize:'12px',color:'#8E8E93',lineHeight:1.5,overflow:'hidden',display:'-webkit-box',WebkitLineClamp:2,WebkitBoxOrient:'vertical' as any }}>{ans.answer}</div>
+                  {ans.tags&&<div style={{ display:'flex',gap:'4px',marginTop:'8px',flexWrap:'wrap' }}>{ans.tags.split(',').map((t,ti)=>(<span key={ti} style={{ padding:'2px 8px',borderRadius:'4px',background:'#F2F2F7',fontSize:'10px',color:'#8E8E93' }}>#{t.trim()}</span>))}</div>}
+                </div>
+              ))}
+            </Card>
+          }
+        </div>
+      )}
+
+      {/* ── Bottom Nav ── */}
+      <div style={{ position:'fixed',bottom:0,left:'50%',transform:'translateX(-50%)',width:'100%',maxWidth:480,background:'#FFF',borderTop:'1px solid #F0F0F0',display:'flex',justifyContent:'space-around',padding:'6px 0 max(6px, env(safe-area-inset-bottom))',zIndex:200 }}>
+        {TABS.map(t=>(
+          <button key={t.id} onClick={()=>setTab(t.id)} style={{ display:'flex',flexDirection:'column',alignItems:'center',gap:'2px',padding:'6px 16px',border:'none',background:'transparent',cursor:'pointer' }}>
+            <Ico d={t.path} size={22} color={tab===t.id?G:'#C7C7CC'} stroke={tab===t.id?2.2:1.6}/>
+            <span style={{ fontSize:'10px',fontWeight:tab===t.id?700:500,color:tab===t.id?G:'#C7C7CC',fontFamily:'inherit' }}>{t.label}</span>
+          </button>
+        ))}
+      </div>
+
+      {/* ═══ ADD/EDIT MODAL ═══ */}
+      <Modal isOpen={showAdd} onClose={()=>{setShowAdd(false);setForm(blankForm());setEditing(null)}} title={editing?'지원 수정':'새 지원 추가'}>
+        <Inp label="회사명 *" value={form.company} onChange={v=>set('company',v)} placeholder="예: 카카오"/>
+        <Inp label="포지션" value={form.position} onChange={v=>set('position',v)} placeholder="예: 프론트엔드 개발자"/>
+        <Inp label="공고 URL" value={form.url} onChange={v=>set('url',v)} placeholder="https://..."/>
+        <div style={{ display:'grid',gridTemplateColumns:'1fr 1fr',gap:'10px' }}>
+          <Sel label="진행 단계" value={form.stage} onChange={v=>set('stage',v)} options={STAGES.map(s=>({value:s.id,label:s.label}))}/>
+          <Inp label="서류 마감일" type="date" value={form.deadline} onChange={v=>set('deadline',v)}/>
+        </div>
+        <div style={{ display:'grid',gridTemplateColumns:'1fr 1fr',gap:'10px' }}>
+          <Inp label="면접 날짜" type="date" value={form.interview_date} onChange={v=>set('interview_date',v)}/>
+          <Inp label="면접 시간" type="time" value={form.interview_time} onChange={v=>set('interview_time',v)}/>
+        </div>
+        <div style={{ marginBottom:'14px' }}>
+          <div style={{ display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'10px' }}>
+            <label style={{ fontSize:'12px',fontWeight:600,color:'#8E8E93' }}>자기소개서</label>
+            <button onClick={()=>set('cover_letter',[...form.cover_letter,{question:'',answer:''}])} style={{ background:'transparent',border:'none',color:G,fontSize:'12px',fontWeight:700,cursor:'pointer',fontFamily:'inherit',textDecoration:'underline',textUnderlineOffset:'2px' }}>+ 문항 추가</button>
+          </div>
+          {form.cover_letter.map((item,idx)=>(
+            <div key={idx} style={{ background:'#FAFAFA',borderRadius:'12px',padding:'14px',marginBottom:'8px' }}>
+              <div style={{ display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'8px' }}>
+                <span style={{ fontSize:'12px',fontWeight:700,color:G }}>문항 {idx+1}</span>
+                <button onClick={()=>set('cover_letter',form.cover_letter.filter((_:any,i:number)=>i!==idx))} style={{ background:'none',border:'none',color:'#FF3B30',cursor:'pointer',fontSize:'12px',fontWeight:600,fontFamily:'inherit' }}>삭제</button>
+              </div>
+              <Inp placeholder="질문" value={item.question} onChange={v=>{const u=[...form.cover_letter];u[idx]={...u[idx],question:v};set('cover_letter',u)}}/>
+              <Inp placeholder="답변 작성..." value={item.answer} onChange={v=>{const u=[...form.cover_letter];u[idx]={...u[idx],answer:v};set('cover_letter',u)}} multi rows={4}/>
+            </div>
+          ))}
+        </div>
+        <Inp label="면접 복기 / 메모" value={form.interview_review} onChange={v=>set('interview_review',v)} multi rows={3} placeholder="면접 질문, 분위기, 느낀 점 등..."/>
+        <Inp label="기타 메모" value={form.notes} onChange={v=>set('notes',v)} multi rows={2} placeholder="참고 사항..."/>
+        <div style={{ display:'flex',gap:'8px',marginTop:'8px' }}>
+          <BtnG onClick={saveApp} disabled={saving} style={{ flex:1 }}>{saving?'저장 중...':editing?'수정 완료':'저장'}</BtnG>
+          <BtnW onClick={()=>{setShowAdd(false);setForm(blankForm());setEditing(null)}} style={{ flex:1 }}>취소</BtnW>
+        </div>
+      </Modal>
+
+      {/* ═══ DETAIL MODAL ═══ */}
+      <Modal isOpen={!!showDetail} onClose={()=>setShowDetail(null)} title="지원 상세">
+        {showDetail&&(()=>{const a=showDetail;return(<>
+          <div style={{ display:'flex',justifyContent:'space-between',alignItems:'flex-start',marginBottom:'16px' }}>
+            <div><div style={{ fontSize:'18px',fontWeight:800,letterSpacing:'-.5px' }}>{a.company}</div><div style={{ fontSize:'13px',color:'#8E8E93',marginTop:'3px' }}>{a.position}</div></div>
+            <Badge stageId={a.stage}/>
+          </div>
+          {a.url&&<div style={{ marginBottom:'14px' }}><span style={{ fontSize:'11px',color:'#8E8E93',fontWeight:600 }}>공고 링크</span><div style={{ fontSize:'12px',color:G,marginTop:'3px',wordBreak:'break-all' }}>{a.url}</div></div>}
+          <div style={{ display:'grid',gridTemplateColumns:'1fr 1fr',gap:'8px',marginBottom:'16px' }}>
+            {a.deadline&&<div style={{ background:'#F7F7FA',borderRadius:'12px',padding:'12px' }}><div style={{ fontSize:'10px',color:'#8E8E93',fontWeight:600 }}>서류 마감</div><div style={{ fontSize:'13px',fontWeight:700,marginTop:'4px' }}>{fmt(a.deadline)}</div></div>}
+            {a.interview_date&&<div style={{ background:'#F7F7FA',borderRadius:'12px',padding:'12px' }}><div style={{ fontSize:'10px',color:'#8E8E93',fontWeight:600 }}>면접 일시</div><div style={{ fontSize:'13px',fontWeight:700,marginTop:'4px' }}>{fmt(a.interview_date)} {a.interview_time}</div></div>}
+          </div>
+          {a.cover_letter?.length>0&&<div style={{ marginBottom:'16px' }}><div style={{ fontSize:'12px',fontWeight:700,marginBottom:'10px' }}>자기소개서 ({a.cover_letter.length}문항)</div>{a.cover_letter.map((cl,i)=>(<div key={i} style={{ background:'#F7F7FA',borderRadius:'12px',padding:'14px',marginBottom:'8px',borderLeft:`3px solid ${G}` }}><div style={{ fontSize:'12px',fontWeight:700,color:G,marginBottom:'8px' }}>Q{i+1}. {cl.question}</div><div style={{ fontSize:'12px',color:'#666',lineHeight:1.7,whiteSpace:'pre-wrap' }}>{cl.answer}</div></div>))}</div>}
+          {a.interview_review&&<div style={{ marginBottom:'16px' }}><div style={{ fontSize:'12px',fontWeight:700,marginBottom:'8px' }}>면접 복기</div><div style={{ background:'#FFF3E0',borderRadius:'12px',padding:'14px',fontSize:'12px',color:'#E65100',lineHeight:1.7,borderLeft:'3px solid #FF6F00',whiteSpace:'pre-wrap' }}>{a.interview_review}</div></div>}
+          {a.notes&&<div style={{ marginBottom:'16px' }}><div style={{ fontSize:'12px',fontWeight:700,marginBottom:'8px' }}>메모</div><div style={{ fontSize:'12px',color:'#666',lineHeight:1.7,background:'#F7F7FA',borderRadius:'12px',padding:'12px',whiteSpace:'pre-wrap' }}>{a.notes}</div></div>}
+          <div style={{ display:'flex',gap:'8px' }}><BtnG onClick={()=>editApp(a)} style={{ flex:1 }}>수정</BtnG><BtnR onClick={()=>delApp(a.id)} style={{ flex:1 }}>삭제</BtnR></div>
+        </>)})()}
+      </Modal>
+
+      {/* ═══ ADD ANS MODAL ═══ */}
+      <Modal isOpen={showAddAns} onClose={()=>{setShowAddAns(false);setAf({question:'',answer:'',tags:''})}} title="자소서 답변 저장">
+        <Inp label="문항" value={af.question} onChange={v=>setAf(p=>({...p,question:v}))} placeholder="예: 지원동기를 작성해주세요"/>
+        <Inp label="답변" value={af.answer} onChange={v=>setAf(p=>({...p,answer:v}))} multi rows={8} placeholder="답변을 작성하세요..."/>
+        <Inp label="태그 (쉼표 구분)" value={af.tags} onChange={v=>setAf(p=>({...p,tags:v}))} placeholder="예: 지원동기, IT, 공통"/>
+        <BtnG onClick={saveAns} disabled={saving} style={{ width:'100%',marginTop:'8px' }}>{saving?'저장 중...':'저장'}</BtnG>
+      </Modal>
+
+      {/* ═══ ANS DETAIL MODAL ═══ */}
+      <Modal isOpen={!!showAnsDetail} onClose={()=>setShowAnsDetail(null)} title="자소서 답변">
+        {showAnsDetail&&(<>
+          <div style={{ fontSize:'15px',fontWeight:700,marginBottom:'14px',letterSpacing:'-.3px' }}>{showAnsDetail.question}</div>
+          <div style={{ background:'#F7F7FA',borderRadius:'12px',padding:'16px',fontSize:'13px',color:'#666',lineHeight:1.8,marginBottom:'14px',whiteSpace:'pre-wrap',borderLeft:`3px solid ${G}` }}>{showAnsDetail.answer}</div>
+          {showAnsDetail.tags&&<div style={{ display:'flex',gap:'5px',marginBottom:'16px',flexWrap:'wrap' }}>{showAnsDetail.tags.split(',').map((t,i)=>(<span key={i} style={{ padding:'3px 9px',borderRadius:'6px',background:'#E6F9EE',fontSize:'11px',color:G,fontWeight:600 }}>#{t.trim()}</span>))}</div>}
+          <BtnR onClick={()=>delAns(showAnsDetail.id)} style={{ width:'100%' }}>삭제</BtnR>
+        </>)}
+      </Modal>
+    </div>
+  )
+}
+
