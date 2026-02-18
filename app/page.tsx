@@ -321,7 +321,7 @@ export default function Home() {
               <div style={{ display:'flex',gap:'3px',marginBottom:'8px' }}>
                 {STAGES.filter(s=>s.id!=='rejected').map(stage=>{
                   const cnt=apps.filter(a=>a.stage===stage.id).length
-                  const w=total>0?Math.max((cnt/total)*100,cnt>0?15:6):20
+                  const w = total > 0 ? Math.max(Math.min((cnt/total)*100, 40), cnt > 0 ? 15 : 6) : 20
                   return <div key={stage.id} style={{ flex:`0 0 ${w}%`,height:'8px',borderRadius:'4px',background:cnt>0?stage.color:'#F2F2F7',transition:'all .3s' }}/>
                 })}
               </div>
