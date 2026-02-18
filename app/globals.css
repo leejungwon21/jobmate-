@@ -1,0 +1,21 @@
+@import url('https://cdn.jsdelivr.net/gh/orioncactus/pretendard/dist/web/variable/pretendardvariable.css');
+
+* {
+  box-sizing: border-box;
+  -webkit-tap-highlight-color: transparent;
+  margin: 0;
+  padding: 0;
+}
+
+::-webkit-scrollbar { width: 0; height: 0; }
+
+html, body {
+  font-family: 'Pretendard Variable', 'Pretendard', -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+  background: #F7F7FA;
+  color: #1A1A1A;
+  -webkit-font-smoothing: antialiased;
+}
+
+@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+@keyframes sheetUp { from { opacity: 0; transform: translateY(100%); } to { opacity: 1; transform: translateY(0); } }
+@keyframes si { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
