@@ -1,5 +1,5 @@
 import { createClient } from './supabase'
-import type { Application, SavedAnswer, CoverLetterItem } from './types'
+import type { Application, SavedAnswer, CoverLetterItem, Portfolio } from './types'
 
 const supabase = createClient()
 
