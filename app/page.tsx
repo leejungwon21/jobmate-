@@ -2,7 +2,8 @@
 
 import { useState, useMemo, useEffect } from 'react'
 import * as db from '@/lib/db'
-import type { Application, SavedAnswer, CoverLetterItem } from '@/lib/types'
+import { analyzeCoverLetter, AnalysisResult } from '@/lib/ai'
+import type { Application, SavedAnswer, CoverLetterItem, Portfolio } from '@/lib/types'
 
 /* ── Constants ── */
 const STAGES = [
@@ -18,6 +19,7 @@ const TABS = [
   { id: 'applications', label: '지원', path: 'M9 5H7a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01' },
   { id: 'calendar', label: '일정', path: 'M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z' },
   { id: 'library', label: '자소서', path: 'M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z' },
+  { id: 'portfolio', label: '포폴', path: 'M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zm10 0a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zm10 0a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z' },
 ]
 const SAMPLE_Q = ['지원동기를 작성해주세요.', '본인의 강점과 약점은?', '입사 후 포부를 작성해주세요.', '팀워크 경험을 기술해주세요.', '갈등 해결 경험을 작성해주세요.']
 const G = '#03C75A'
@@ -27,7 +29,7 @@ function fmt(d: string | null) { if (!d) return ''; const dt = new Date(d), w = 
 function daysUntil(d: string | null) { if (!d) return null; const n = new Date(); n.setHours(0,0,0,0); const t = new Date(d); t.setHours(0,0,0,0); return Math.ceil((t.getTime()-n.getTime())/864e5) }
 function sameDay(a: Date, b: Date) { return a.getFullYear()===b.getFullYear()&&a.getMonth()===b.getMonth()&&a.getDate()===b.getDate() }
 
-/* ── Shared UI Components ── */
+/* ── UI Components ── */
 function Ico({ d, size=22, color='#C7C7CC', stroke=1.8 }: { d: string; size?: number; color?: string; stroke?: number }) {
   return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={stroke} strokeLinecap="round" strokeLinejoin="round"><path d={d}/></svg>
 }
@@ -110,7 +112,6 @@ function Cal({ applications, selectedDate, onSelectDate }: { applications: Appli
   },[applications])
   const cells: (number|null)[] = []; for(let i=0;i<fd;i++) cells.push(null); for(let d=1;d<=dim;d++) cells.push(d)
   const mn = ['1월','2월','3월','4월','5월','6월','7월','8월','9월','10월','11월','12월']
-
   return (
     <Card style={{ padding:'20px',marginBottom:'16px' }}>
       <div style={{ display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'20px' }}>
@@ -124,11 +125,11 @@ function Cal({ applications, selectedDate, onSelectDate }: { applications: Appli
       <div style={{ display:'grid',gridTemplateColumns:'repeat(7,1fr)',gap:'2px' }}>
         {cells.map((day,i)=>{
           if(!day) return <div key={`e${i}`}/>
-          const ds = `${y}-${String(m+1).padStart(2,'0')}-${String(day).padStart(2,'0')}`
-          const de = ev[ds]||[]
-          const isT = sameDay(new Date(y,m,day),today), isS = selectedDate===ds
-          const hI = de.some(e=>e.et==='interview'), hD = de.some(e=>e.et==='deadline')
-          const dow = new Date(y,m,day).getDay()
+          const ds=`${y}-${String(m+1).padStart(2,'0')}-${String(day).padStart(2,'0')}`
+          const de=ev[ds]||[]
+          const isT=sameDay(new Date(y,m,day),today),isS=selectedDate===ds
+          const hI=de.some(e=>e.et==='interview'),hD=de.some(e=>e.et==='deadline')
+          const dow=new Date(y,m,day).getDay()
           return (
             <button key={day} onClick={()=>onSelectDate(ds)} style={{ aspectRatio:'1',borderRadius:'12px',border:'none',background:isS?G:isT?'#F2F2F7':'transparent',cursor:'pointer',display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',gap:'2px',transition:'all .1s' }}>
               <span style={{ fontSize:'13px',fontWeight:isT||isS?700:400,color:isS?'#FFF':isT?'#1A1A1A':dow===0?'#FF3B30':dow===6?'#007AFF':'#555' }}>{day}</span>
@@ -144,152 +145,158 @@ function Cal({ applications, selectedDate, onSelectDate }: { applications: Appli
   )
 }
 
-/* ═══════════════════════════════════ */
-/*           MAIN APP                 */
-/* ═══════════════════════════════════ */
-
-interface FormData {
-  company: string; position: string; stage: string
-  deadline: string; interview_date: string; interview_time: string
-  cover_letter: CoverLetterItem[]; notes: string; url: string; interview_review: string
+/* ── Score Ring ── */
+function ScoreRing({ score }: { score: number }) {
+  const r = 36, c = 2 * Math.PI * r, off = c - (score / 100) * c
+  const color = score >= 80 ? G : score >= 60 ? '#FF6F00' : '#FF3B30'
+  return (
+    <div style={{ position:'relative',width:90,height:90 }}>
+      <svg width={90} height={90} style={{ transform:'rotate(-90deg)' }}>
+        <circle cx={45} cy={45} r={r} fill="none" stroke="#F2F2F7" strokeWidth={7}/>
+        <circle cx={45} cy={45} r={r} fill="none" stroke={color} strokeWidth={7} strokeDasharray={c} strokeDashoffset={off} strokeLinecap="round" style={{ transition:'stroke-dashoffset .8s ease' }}/>
+      </svg>
+      <div style={{ position:'absolute',inset:0,display:'grid',placeItems:'center' }}>
+        <div style={{ textAlign:'center' }}>
+          <div style={{ fontSize:'22px',fontWeight:800,color }}>{score}</div>
+          <div style={{ fontSize:'9px',color:'#8E8E93',fontWeight:600 }}>점</div>
+        </div>
+      </div>
+    </div>
+  )
 }
 
-const blankForm = (): FormData => ({
-  company:'', position:'', stage:'preparing', deadline:'',
-  interview_date:'', interview_time:'', cover_letter:[],
-  notes:'', url:'', interview_review:''
-})
+/* ═══ MAIN ═══ */
+interface FormData {
+  company: string; position: string; stage: string; deadline: string
+  interview_date: string; interview_time: string; cover_letter: CoverLetterItem[]
+  notes: string; url: string; interview_review: string
+}
+const blankForm = (): FormData => ({ company:'',position:'',stage:'preparing',deadline:'',interview_date:'',interview_time:'',cover_letter:[],notes:'',url:'',interview_review:'' })
+
+interface PfForm { title: string; description: string; tech_stack: string; github_url: string; deploy_url: string }
+const blankPf = (): PfForm => ({ title:'',description:'',tech_stack:'',github_url:'',deploy_url:'' })
 
 export default function Home() {
-  const [tab, setTab] = useState('dashboard')
-  const [apps, setApps] = useState<Application[]>([])
-  const [saved, setSaved] = useState<SavedAnswer[]>([])
-  const [loading, setLoading] = useState(true)
-  const [saving, setSaving] = useState(false)
+  const [tab,setTab]=useState('dashboard')
+  const [apps,setApps]=useState<Application[]>([])
+  const [saved,setSaved]=useState<SavedAnswer[]>([])
+  const [portfolios,setPortfolios]=useState<Portfolio[]>([])
+  const [loading,setLoading]=useState(true)
+  const [saving,setSaving]=useState(false)
+  const [showAdd,setShowAdd]=useState(false)
+  const [showDetail,setShowDetail]=useState<Application|null>(null)
+  const [showAddAns,setShowAddAns]=useState(false)
+  const [showAnsDetail,setShowAnsDetail]=useState<SavedAnswer|null>(null)
+  const [editing,setEditing]=useState<string|null>(null)
+  const [filter,setFilter]=useState('all')
+  const [selCal,setSelCal]=useState<string|null>(null)
+  const [form,setForm]=useState<FormData>(blankForm())
+  const [af,setAf]=useState({question:'',answer:'',tags:''})
+  const set=(k:string,v:any)=>setForm(p=>({...p,[k]:v}))
 
-  const [showAdd, setShowAdd] = useState(false)
-  const [showDetail, setShowDetail] = useState<Application|null>(null)
-  const [showAddAns, setShowAddAns] = useState(false)
-  const [showAnsDetail, setShowAnsDetail] = useState<SavedAnswer|null>(null)
-  const [editing, setEditing] = useState<string|null>(null)
-  const [filter, setFilter] = useState('all')
-  const [selCal, setSelCal] = useState<string|null>(null)
+  // Portfolio state
+  const [showAddPf,setShowAddPf]=useState(false)
+  const [showPfDetail,setShowPfDetail]=useState<Portfolio|null>(null)
+  const [editingPf,setEditingPf]=useState<string|null>(null)
+  const [pf,setPf]=useState<PfForm>(blankPf())
 
-  const [form, setForm] = useState<FormData>(blankForm())
-  const [af, setAf] = useState({ question:'', answer:'', tags:'' })
-  const set = (k: string, v: any) => setForm(p => ({ ...p, [k]: v }))
+  // AI state
+  const [analyzing,setAnalyzing]=useState(false)
+  const [aiResult,setAiResult]=useState<AnalysisResult|null>(null)
+  const [showAiModal,setShowAiModal]=useState(false)
+  const [aiQ,setAiQ]=useState('')
+  const [aiA,setAiA]=useState('')
+  const [aiJd,setAiJd]=useState('')
 
-  /* ── Load data from Supabase ── */
-  useEffect(() => {
-    async function load() {
+  useEffect(()=>{
+    async function load(){
       setLoading(true)
-      const [a, s] = await Promise.all([db.getApplications(), db.getSavedAnswers()])
-      setApps(a)
-      setSaved(s)
-      setLoading(false)
+      const [a,s,p]=await Promise.all([db.getApplications(),db.getSavedAnswers(),db.getPortfolios()])
+      setApps(a); setSaved(s); setPortfolios(p); setLoading(false)
     }
     load()
-  }, [])
+  },[])
 
-  /* ── CRUD handlers ── */
-  async function saveApp() {
-    if (!form.company.trim()) return
+  // App CRUD
+  async function saveApp(){
+    if(!form.company.trim()) return
     setSaving(true)
-    if (editing) {
-      const result = await db.updateApplication(editing, {
-        company: form.company, position: form.position, stage: form.stage,
-        deadline: form.deadline || null, interview_date: form.interview_date || null,
-        interview_time: form.interview_time || null, url: form.url || null,
-        notes: form.notes || null, interview_review: form.interview_review || null,
-        cover_letter: form.cover_letter,
-      })
-      if (result) setApps(p => p.map(a => a.id === editing ? result : a))
+    if(editing){
+      const result=await db.updateApplication(editing,{company:form.company,position:form.position,stage:form.stage,deadline:form.deadline||null,interview_date:form.interview_date||null,interview_time:form.interview_time||null,url:form.url||null,notes:form.notes||null,interview_review:form.interview_review||null,cover_letter:form.cover_letter})
+      if(result) setApps(p=>p.map(a=>a.id===editing?result:a))
     } else {
-      const result = await db.createApplication({
-        company: form.company, position: form.position, stage: form.stage,
-        deadline: form.deadline || null, interview_date: form.interview_date || null,
-        interview_time: form.interview_time || null, url: form.url || null,
-        notes: form.notes || null, interview_review: form.interview_review || null,
-        cover_letter: form.cover_letter,
-      } as any)
-      if (result) setApps(p => [result, ...p])
+      const result=await db.createApplication({company:form.company,position:form.position,stage:form.stage,deadline:form.deadline||null,interview_date:form.interview_date||null,interview_time:form.interview_time||null,url:form.url||null,notes:form.notes||null,interview_review:form.interview_review||null,cover_letter:form.cover_letter} as any)
+      if(result) setApps(p=>[result,...p])
     }
-    setSaving(false)
-    setForm(blankForm()); setEditing(null); setShowAdd(false)
+    setSaving(false); setForm(blankForm()); setEditing(null); setShowAdd(false)
   }
+  async function delApp(id:string){ const ok=await db.deleteApplication(id); if(ok) setApps(p=>p.filter(a=>a.id!==id)); setShowDetail(null) }
+  function editApp(a:Application){ setForm({company:a.company,position:a.position,stage:a.stage,deadline:a.deadline||'',interview_date:a.interview_date||'',interview_time:a.interview_time||'',cover_letter:a.cover_letter||[],notes:a.notes||'',url:a.url||'',interview_review:a.interview_review||''}); setEditing(a.id); setShowDetail(null); setShowAdd(true) }
 
-  async function delApp(id: string) {
-    const ok = await db.deleteApplication(id)
-    if (ok) setApps(p => p.filter(a => a.id !== id))
-    setShowDetail(null)
-  }
+  // SavedAns CRUD
+  async function saveAns(){ if(!af.question.trim()) return; setSaving(true); const result=await db.createSavedAnswer({question:af.question,answer:af.answer,tags:af.tags||null} as any); if(result) setSaved(p=>[result,...p]); setSaving(false); setAf({question:'',answer:'',tags:''}); setShowAddAns(false) }
+  async function delAns(id:string){ const ok=await db.deleteSavedAnswer(id); if(ok) setSaved(p=>p.filter(a=>a.id!==id)); setShowAnsDetail(null) }
 
-  function editApp(a: Application) {
-    setForm({
-      company: a.company, position: a.position, stage: a.stage,
-      deadline: a.deadline || '', interview_date: a.interview_date || '',
-      interview_time: a.interview_time || '', cover_letter: a.cover_letter || [],
-      notes: a.notes || '', url: a.url || '', interview_review: a.interview_review || '',
-    })
-    setEditing(a.id); setShowDetail(null); setShowAdd(true)
-  }
-
-  async function saveAns() {
-    if (!af.question.trim()) return
+  // Portfolio CRUD
+  async function savePf(){
+    if(!pf.title.trim()) return
     setSaving(true)
-    const result = await db.createSavedAnswer({
-      question: af.question, answer: af.answer, tags: af.tags || null,
-    } as any)
-    if (result) setSaved(p => [result, ...p])
-    setSaving(false)
-    setAf({ question:'', answer:'', tags:'' }); setShowAddAns(false)
+    if(editingPf){
+      const result=await db.updatePortfolio(editingPf,{title:pf.title,description:pf.description,tech_stack:pf.tech_stack,github_url:pf.github_url||null,deploy_url:pf.deploy_url||null})
+      if(result) setPortfolios(p=>p.map(x=>x.id===editingPf?result:x))
+    } else {
+      const result=await db.createPortfolio({title:pf.title,description:pf.description,tech_stack:pf.tech_stack,github_url:pf.github_url||null,deploy_url:pf.deploy_url||null} as any)
+      if(result) setPortfolios(p=>[result,...p])
+    }
+    setSaving(false); setPf(blankPf()); setEditingPf(null); setShowAddPf(false)
+  }
+  async function delPf(id:string){ const ok=await db.deletePortfolio(id); if(ok) setPortfolios(p=>p.filter(x=>x.id!==id)); setShowPfDetail(null) }
+  function editPf(p:Portfolio){ setPf({title:p.title,description:p.description,tech_stack:p.tech_stack,github_url:p.github_url||'',deploy_url:p.deploy_url||''}); setEditingPf(p.id); setShowPfDetail(null); setShowAddPf(true) }
+
+  // AI Analysis
+  async function runAi(){
+    if(!aiA.trim()) return
+    setAnalyzing(true); setAiResult(null)
+    try {
+      const result = await analyzeCoverLetter(aiQ, aiA, aiJd||undefined)
+      setAiResult(result)
+    } catch(e:any) { alert(e.message || 'AI 분석 실패') }
+    setAnalyzing(false)
   }
 
-  async function delAns(id: string) {
-    const ok = await db.deleteSavedAnswer(id)
-    if (ok) setSaved(p => p.filter(a => a.id !== id))
-    setShowAnsDetail(null)
-  }
+  // Computed
+  const total=apps.length
+  const passed=apps.filter(a=>['doc_pass','interview','final_pass'].includes(a.stage)).length
+  const intv=apps.filter(a=>a.stage==='interview').length
+  const finals=apps.filter(a=>a.stage==='final_pass').length
+  const upcoming=apps.filter(a=>a.interview_date&&(daysUntil(a.interview_date)??-1)>=0).sort((a,b)=>new Date(a.interview_date!).getTime()-new Date(b.interview_date!).getTime())
+  const deadlines=apps.filter(a=>a.deadline&&(daysUntil(a.deadline)??-1)>=0&&a.stage==='preparing').sort((a,b)=>new Date(a.deadline!).getTime()-new Date(b.deadline!).getTime())
+  const filtered=filter==='all'?apps:apps.filter(a=>a.stage===filter)
 
-  /* ── Computed ── */
-  const total = apps.length
-  const passed = apps.filter(a => ['doc_pass','interview','final_pass'].includes(a.stage)).length
-  const intv = apps.filter(a => a.stage === 'interview').length
-  const finals = apps.filter(a => a.stage === 'final_pass').length
-  const upcoming = apps.filter(a => a.interview_date && (daysUntil(a.interview_date) ?? -1) >= 0).sort((a,b) => new Date(a.interview_date!).getTime() - new Date(b.interview_date!).getTime())
-  const deadlines = apps.filter(a => a.deadline && (daysUntil(a.deadline) ?? -1) >= 0 && a.stage === 'preparing').sort((a,b) => new Date(a.deadline!).getTime() - new Date(b.deadline!).getTime())
-  const filtered = filter === 'all' ? apps : apps.filter(a => a.stage === filter)
+  const calEvts=useMemo(()=>{
+    if(!selCal) return []
+    return [...apps.filter(a=>a.deadline===selCal).map(a=>({...a,et:'deadline' as const})),...apps.filter(a=>a.interview_date===selCal).map(a=>({...a,et:'interview' as const}))]
+  },[selCal,apps])
 
-  const calEvts = useMemo(() => {
-    if (!selCal) return []
+  const allEvts=useMemo(()=>[
+    ...apps.filter(a=>a.deadline&&(daysUntil(a.deadline)??-1)>=0).map(a=>({...a,et:'deadline' as const,ed:a.deadline!})),
+    ...apps.filter(a=>a.interview_date&&(daysUntil(a.interview_date)??-1)>=0).map(a=>({...a,et:'interview' as const,ed:a.interview_date!})),
+  ].sort((a,b)=>new Date(a.ed).getTime()-new Date(b.ed).getTime()),[apps])
+
+  const weekEvents=useMemo(()=>{
+    const now=new Date(); now.setHours(0,0,0,0)
+    const eow=new Date(now); eow.setDate(now.getDate()+(7-now.getDay()))
+    const inWeek=(ds:string)=>{const d=new Date(ds);d.setHours(0,0,0,0);return d>=now&&d<=eow}
     return [
-      ...apps.filter(a => a.deadline === selCal).map(a => ({ ...a, et: 'deadline' as const })),
-      ...apps.filter(a => a.interview_date === selCal).map(a => ({ ...a, et: 'interview' as const })),
-    ]
-  }, [selCal, apps])
+      ...apps.filter(a=>a.deadline&&inWeek(a.deadline)).map(a=>({...a,et:'deadline' as const,ed:a.deadline!})),
+      ...apps.filter(a=>a.interview_date&&inWeek(a.interview_date)).map(a=>({...a,et:'interview' as const,ed:a.interview_date!})),
+    ].sort((a,b)=>new Date(a.ed).getTime()-new Date(b.ed).getTime())
+  },[apps])
 
-  const allEvts = useMemo(() => [
-    ...apps.filter(a => a.deadline && (daysUntil(a.deadline) ?? -1) >= 0).map(a => ({ ...a, et: 'deadline' as const, ed: a.deadline! })),
-    ...apps.filter(a => a.interview_date && (daysUntil(a.interview_date) ?? -1) >= 0).map(a => ({ ...a, et: 'interview' as const, ed: a.interview_date! })),
-  ].sort((a,b) => new Date(a.ed).getTime() - new Date(b.ed).getTime()), [apps])
-
-  const weekEvents = useMemo(() => {
-    const now = new Date(); now.setHours(0,0,0,0)
-    const eow = new Date(now); eow.setDate(now.getDate() + (7 - now.getDay()))
-    const inWeek = (ds: string) => { const d = new Date(ds); d.setHours(0,0,0,0); return d >= now && d <= eow }
-    return [
-      ...apps.filter(a => a.deadline && inWeek(a.deadline)).map(a => ({ ...a, et: 'deadline' as const, ed: a.deadline! })),
-      ...apps.filter(a => a.interview_date && inWeek(a.interview_date)).map(a => ({ ...a, et: 'interview' as const, ed: a.interview_date! })),
-    ].sort((a, b) => new Date(a.ed).getTime() - new Date(b.ed).getTime())
-  }, [apps])
-
-  /* ── Loading state ── */
-  if (loading) return (
+  if(loading) return (
     <div style={{ display:'grid',placeItems:'center',minHeight:'100vh',background:'#F7F7FA' }}>
       <div style={{ textAlign:'center' }}>
-        <div style={{ width:40,height:40,borderRadius:'10px',background:G,display:'grid',placeItems:'center',margin:'0 auto 12px' }}>
-          <span style={{ color:'#FFF',fontSize:'18px',fontWeight:900 }}>J</span>
-        </div>
+        <div style={{ width:40,height:40,borderRadius:'10px',background:G,display:'grid',placeItems:'center',margin:'0 auto 12px' }}><span style={{ color:'#FFF',fontSize:'18px',fontWeight:900 }}>J</span></div>
         <div style={{ color:'#8E8E93',fontSize:'14px' }}>불러오는 중...</div>
       </div>
     </div>
@@ -302,9 +309,7 @@ export default function Home() {
       <div style={{ padding:'14px 20px',position:'sticky',top:0,zIndex:100,background:'#FFF',borderBottom:'1px solid #F0F0F0' }}>
         <div style={{ display:'flex',justifyContent:'space-between',alignItems:'center' }}>
           <div style={{ display:'flex',alignItems:'center',gap:'8px' }}>
-            <div style={{ width:28,height:28,borderRadius:'8px',background:G,display:'grid',placeItems:'center' }}>
-              <span style={{ color:'#FFF',fontSize:'14px',fontWeight:900 }}>J</span>
-            </div>
+            <div style={{ width:28,height:28,borderRadius:'8px',background:G,display:'grid',placeItems:'center' }}><span style={{ color:'#FFF',fontSize:'14px',fontWeight:900 }}>J</span></div>
             <h1 style={{ margin:0,fontSize:'18px',fontWeight:800,letterSpacing:'-.5px' }}>JOBMATE</h1>
           </div>
           <BtnG onClick={()=>{setForm(blankForm());setEditing(null);setShowAdd(true)}} sm>+ 새 지원</BtnG>
@@ -314,7 +319,6 @@ export default function Home() {
       {/* ═══ DASHBOARD ═══ */}
       {tab==='dashboard'&&(
         <div style={{ padding:'16px 16px 0',animation:'si .25s ease' }}>
-          {/* 취업 현황 */}
           <Card style={{ padding:'24px 20px',marginBottom:'12px' }}>
             <div style={{ fontSize:'13px',fontWeight:700,marginBottom:'16px' }}>취업 현황</div>
             <div style={{ display:'grid',gridTemplateColumns:'repeat(2,1fr)',gap:'12px' }}>
@@ -329,7 +333,6 @@ export default function Home() {
             </div>
           </Card>
 
-          {/* 비율 분석 */}
           {total>0&&(
             <Card style={{ padding:'20px',marginBottom:'12px' }}>
               <div style={{ fontSize:'13px',fontWeight:700,marginBottom:'16px' }}>비율 분석</div>
@@ -354,7 +357,6 @@ export default function Home() {
             </Card>
           )}
 
-          {/* 단계별 현황 */}
           {total>0&&(
             <Card style={{ padding:'20px',marginBottom:'12px' }}>
               <div style={{ fontSize:'13px',fontWeight:700,marginBottom:'14px' }}>단계별 현황</div>
@@ -372,7 +374,6 @@ export default function Home() {
             </Card>
           )}
 
-          {/* 이번 주 할 일 */}
           {weekEvents.length>0&&(
             <Card style={{ padding:'18px 20px',marginBottom:'12px' }}>
               <div style={{ display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'14px' }}>
@@ -396,7 +397,6 @@ export default function Home() {
             </Card>
           )}
 
-          {/* 다가오는 면접 */}
           {upcoming.length>0&&(
             <Card style={{ padding:'18px 20px',marginBottom:'12px' }}>
               <div style={{ fontSize:'13px',fontWeight:700,marginBottom:'14px' }}>다가오는 면접</div>
@@ -412,7 +412,6 @@ export default function Home() {
             </Card>
           )}
 
-          {/* 마감 임박 */}
           {deadlines.length>0&&(
             <Card style={{ padding:'18px 20px',marginBottom:'12px' }}>
               <div style={{ fontSize:'13px',fontWeight:700,marginBottom:'14px' }}>마감 임박</div>
@@ -428,7 +427,6 @@ export default function Home() {
             </Card>
           )}
 
-          {/* 최근 활동 */}
           {apps.length>0&&(
             <Card style={{ padding:'18px 20px',marginBottom:'12px' }}>
               <div style={{ fontSize:'13px',fontWeight:700,marginBottom:'14px' }}>🕐 최근 활동</div>
@@ -522,12 +520,15 @@ export default function Home() {
         </div>
       )}
 
-      {/* ═══ LIBRARY ═══ */}
+      {/* ═══ LIBRARY (자소서 + AI) ═══ */}
       {tab==='library'&&(
         <div style={{ padding:'16px 16px 0',animation:'si .25s ease' }}>
           <div style={{ display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'12px',padding:'0 4px' }}>
             <div style={{ fontSize:'15px',fontWeight:700 }}>자소서 보관함</div>
-            <BtnG onClick={()=>setShowAddAns(true)} sm>+ 추가</BtnG>
+            <div style={{ display:'flex',gap:'6px' }}>
+              <button onClick={()=>{setAiQ('');setAiA('');setAiJd('');setAiResult(null);setShowAiModal(true)}} style={{ padding:'8px 14px',borderRadius:'12px',border:'1.5px solid #7C3AED',background:'#F5F0FF',color:'#7C3AED',fontSize:'12px',fontWeight:700,cursor:'pointer',fontFamily:'inherit' }}>AI 분석</button>
+              <BtnG onClick={()=>setShowAddAns(true)} sm>+ 추가</BtnG>
+            </div>
           </div>
           <Card style={{ padding:'16px 20px',marginBottom:'12px' }}>
             <div style={{ fontSize:'11px',fontWeight:700,color:'#8E8E93',marginBottom:'10px' }}>자주 나오는 문항</div>
@@ -549,17 +550,44 @@ export default function Home() {
         </div>
       )}
 
+      {/* ═══ PORTFOLIO ═══ */}
+      {tab==='portfolio'&&(
+        <div style={{ padding:'16px 16px 0',animation:'si .25s ease' }}>
+          <div style={{ display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'12px',padding:'0 4px' }}>
+            <div style={{ fontSize:'15px',fontWeight:700 }}>포트폴리오</div>
+            <BtnG onClick={()=>{setPf(blankPf());setEditingPf(null);setShowAddPf(true)}} sm>+ 추가</BtnG>
+          </div>
+          {portfolios.length===0?<Empty icon="🗂️" title="포트폴리오가 없어요" sub="프로젝트를 추가해보세요"/>:
+            portfolios.map((p,i)=>(
+              <Card key={p.id} onClick={()=>setShowPfDetail(p)} style={{ padding:'18px 20px',marginBottom:'10px',cursor:'pointer' }}>
+                <div style={{ fontSize:'15px',fontWeight:700,marginBottom:'6px' }}>{p.title}</div>
+                {p.description&&<div style={{ fontSize:'12px',color:'#8E8E93',lineHeight:1.5,marginBottom:'8px',overflow:'hidden',display:'-webkit-box',WebkitLineClamp:2,WebkitBoxOrient:'vertical' as any }}>{p.description}</div>}
+                {p.tech_stack&&(
+                  <div style={{ display:'flex',flexWrap:'wrap',gap:'4px',marginBottom:'8px' }}>
+                    {p.tech_stack.split(',').map((t,ti)=>(<span key={ti} style={{ padding:'3px 8px',borderRadius:'6px',background:'#E8F2FF',fontSize:'10px',color:'#007AFF',fontWeight:600 }}>{t.trim()}</span>))}
+                  </div>
+                )}
+                <div style={{ display:'flex',gap:'10px' }}>
+                  {p.github_url&&<span style={{ fontSize:'11px',color:G }}>GitHub</span>}
+                  {p.deploy_url&&<span style={{ fontSize:'11px',color:'#007AFF' }}>Demo</span>}
+                </div>
+              </Card>
+            ))
+          }
+        </div>
+      )}
+
       {/* ── Bottom Nav ── */}
       <div style={{ position:'fixed',bottom:0,left:'50%',transform:'translateX(-50%)',width:'100%',maxWidth:480,background:'#FFF',borderTop:'1px solid #F0F0F0',display:'flex',justifyContent:'space-around',padding:'6px 0 max(6px, env(safe-area-inset-bottom))',zIndex:200 }}>
         {TABS.map(t=>(
-          <button key={t.id} onClick={()=>setTab(t.id)} style={{ display:'flex',flexDirection:'column',alignItems:'center',gap:'2px',padding:'6px 16px',border:'none',background:'transparent',cursor:'pointer' }}>
-            <Ico d={t.path} size={22} color={tab===t.id?G:'#C7C7CC'} stroke={tab===t.id?2.2:1.6}/>
-            <span style={{ fontSize:'10px',fontWeight:tab===t.id?700:500,color:tab===t.id?G:'#C7C7CC',fontFamily:'inherit' }}>{t.label}</span>
+          <button key={t.id} onClick={()=>setTab(t.id)} style={{ display:'flex',flexDirection:'column',alignItems:'center',gap:'2px',padding:'4px 8px',border:'none',background:'transparent',cursor:'pointer' }}>
+            <Ico d={t.path} size={20} color={tab===t.id?G:'#C7C7CC'} stroke={tab===t.id?2.2:1.6}/>
+            <span style={{ fontSize:'9px',fontWeight:tab===t.id?700:500,color:tab===t.id?G:'#C7C7CC',fontFamily:'inherit' }}>{t.label}</span>
           </button>
         ))}
       </div>
 
-      {/* ═══ ADD/EDIT MODAL ═══ */}
+      {/* ═══ ADD/EDIT APP MODAL ═══ */}
       <Modal isOpen={showAdd} onClose={()=>{setShowAdd(false);setForm(blankForm());setEditing(null)}} title={editing?'지원 수정':'새 지원 추가'}>
         <Inp label="회사명 *" value={form.company} onChange={v=>set('company',v)} placeholder="예: 카카오"/>
         <Inp label="포지션" value={form.position} onChange={v=>set('position',v)} placeholder="예: 프론트엔드 개발자"/>
@@ -629,10 +657,105 @@ export default function Home() {
           <div style={{ fontSize:'15px',fontWeight:700,marginBottom:'14px',letterSpacing:'-.3px' }}>{showAnsDetail.question}</div>
           <div style={{ background:'#F7F7FA',borderRadius:'12px',padding:'16px',fontSize:'13px',color:'#666',lineHeight:1.8,marginBottom:'14px',whiteSpace:'pre-wrap',borderLeft:`3px solid ${G}` }}>{showAnsDetail.answer}</div>
           {showAnsDetail.tags&&<div style={{ display:'flex',gap:'5px',marginBottom:'16px',flexWrap:'wrap' }}>{showAnsDetail.tags.split(',').map((t,i)=>(<span key={i} style={{ padding:'3px 9px',borderRadius:'6px',background:'#E6F9EE',fontSize:'11px',color:G,fontWeight:600 }}>#{t.trim()}</span>))}</div>}
-          <BtnR onClick={()=>delAns(showAnsDetail.id)} style={{ width:'100%' }}>삭제</BtnR>
+          <div style={{ display:'flex',gap:'8px' }}>
+            <button onClick={()=>{setAiQ(showAnsDetail.question);setAiA(showAnsDetail.answer);setAiJd('');setAiResult(null);setShowAnsDetail(null);setShowAiModal(true)}} style={{ flex:1,padding:'13px',borderRadius:'12px',border:'1.5px solid #7C3AED',background:'#F5F0FF',color:'#7C3AED',fontSize:'14px',fontWeight:700,cursor:'pointer',fontFamily:'inherit' }}>AI 분석</button>
+            <BtnR onClick={()=>delAns(showAnsDetail.id)} style={{ flex:1 }}>삭제</BtnR>
+          </div>
+        </>)}
+      </Modal>
+
+      {/* ═══ AI ANALYSIS MODAL ═══ */}
+      <Modal isOpen={showAiModal} onClose={()=>{setShowAiModal(false);setAiResult(null)}} title="AI 자소서 분석">
+        {!aiResult ? (
+          <>
+            <div style={{ background:'#F5F0FF',borderRadius:'12px',padding:'14px',marginBottom:'14px',display:'flex',gap:'10px',alignItems:'center' }}>
+              <span style={{ fontSize:'20px' }}>🤖</span>
+              <div style={{ fontSize:'12px',color:'#7C3AED',lineHeight:1.5 }}>AI가 맞춤법, 내용 강화, JD 부합도를 분석해드려요</div>
+            </div>
+            <Inp label="문항" value={aiQ} onChange={setAiQ} placeholder="예: 지원동기를 작성해주세요"/>
+            <Inp label="답변 *" value={aiA} onChange={setAiA} multi rows={6} placeholder="분석할 자소서 답변을 입력하세요"/>
+            <Inp label="채용공고 JD (선택)" value={aiJd} onChange={setAiJd} multi rows={3} placeholder="JD를 입력하면 부합도도 분석해요"/>
+            <BtnG onClick={runAi} disabled={analyzing||!aiA.trim()} style={{ width:'100%',marginTop:'4px',background:analyzing?'#C7C7CC':'#7C3AED' }}>
+              {analyzing?'분석 중...':'AI 분석 시작'}
+            </BtnG>
+          </>
+        ) : (
+          <>
+            <div style={{ display:'flex',justifyContent:'center',marginBottom:'16px' }}>
+              <ScoreRing score={aiResult.score}/>
+            </div>
+
+            {aiResult.grammar.length>0&&(
+              <div style={{ marginBottom:'14px' }}>
+                <div style={{ fontSize:'13px',fontWeight:700,marginBottom:'8px',color:'#FF3B30' }}>맞춤법/문법 교정</div>
+                {aiResult.grammar.map((g,i)=>(
+                  <div key={i} style={{ background:'#FFEBEE',borderRadius:'10px',padding:'10px 14px',marginBottom:'6px',fontSize:'12px',color:'#C62828',lineHeight:1.6 }}>{g}</div>
+                ))}
+              </div>
+            )}
+
+            <div style={{ marginBottom:'14px' }}>
+              <div style={{ fontSize:'13px',fontWeight:700,marginBottom:'8px',color:'#007AFF' }}>내용 강화 제안</div>
+              {aiResult.improvements.map((imp,i)=>(
+                <div key={i} style={{ background:'#E8F2FF',borderRadius:'10px',padding:'10px 14px',marginBottom:'6px',fontSize:'12px',color:'#1565C0',lineHeight:1.6 }}>{imp}</div>
+              ))}
+            </div>
+
+            {aiResult.jdMatch&&(
+              <div style={{ marginBottom:'14px' }}>
+                <div style={{ fontSize:'13px',fontWeight:700,marginBottom:'8px',color:'#FF6F00' }}>JD 부합도</div>
+                <div style={{ background:'#FFF3E0',borderRadius:'10px',padding:'12px 14px',fontSize:'12px',color:'#E65100',lineHeight:1.6 }}>{aiResult.jdMatch}</div>
+              </div>
+            )}
+
+            {aiResult.rewritten&&(
+              <div style={{ marginBottom:'14px' }}>
+                <div style={{ fontSize:'13px',fontWeight:700,marginBottom:'8px',color:G }}>개선된 버전</div>
+                <div style={{ background:'#E6F9EE',borderRadius:'10px',padding:'12px 14px',fontSize:'12px',color:'#1B5E20',lineHeight:1.7,whiteSpace:'pre-wrap' }}>{aiResult.rewritten}</div>
+              </div>
+            )}
+
+            <div style={{ display:'flex',gap:'8px' }}>
+              <BtnW onClick={()=>setAiResult(null)} style={{ flex:1 }}>다시 분석</BtnW>
+              <BtnG onClick={()=>{setShowAiModal(false);setAiResult(null)}} style={{ flex:1,background:'#7C3AED' }}>닫기</BtnG>
+            </div>
+          </>
+        )}
+      </Modal>
+
+      {/* ═══ ADD/EDIT PORTFOLIO MODAL ═══ */}
+      <Modal isOpen={showAddPf} onClose={()=>{setShowAddPf(false);setPf(blankPf());setEditingPf(null)}} title={editingPf?'프로젝트 수정':'프로젝트 추가'}>
+        <Inp label="프로젝트명 *" value={pf.title} onChange={v=>setPf(p=>({...p,title:v}))} placeholder="예: JOBMATE 취업관리 앱"/>
+        <Inp label="설명" value={pf.description} onChange={v=>setPf(p=>({...p,description:v}))} multi rows={4} placeholder="어떤 프로젝트인지 설명해주세요"/>
+        <Inp label="기술 스택 (쉼표 구분)" value={pf.tech_stack} onChange={v=>setPf(p=>({...p,tech_stack:v}))} placeholder="React, Next.js, TypeScript"/>
+        <Inp label="GitHub URL" value={pf.github_url} onChange={v=>setPf(p=>({...p,github_url:v}))} placeholder="https://github.com/..."/>
+        <Inp label="배포 URL" value={pf.deploy_url} onChange={v=>setPf(p=>({...p,deploy_url:v}))} placeholder="https://..."/>
+        <div style={{ display:'flex',gap:'8px',marginTop:'8px' }}>
+          <BtnG onClick={savePf} disabled={saving} style={{ flex:1 }}>{saving?'저장 중...':editingPf?'수정 완료':'저장'}</BtnG>
+          <BtnW onClick={()=>{setShowAddPf(false);setPf(blankPf());setEditingPf(null)}} style={{ flex:1 }}>취소</BtnW>
+        </div>
+      </Modal>
+
+      {/* ═══ PORTFOLIO DETAIL MODAL ═══ */}
+      <Modal isOpen={!!showPfDetail} onClose={()=>setShowPfDetail(null)} title="프로젝트 상세">
+        {showPfDetail&&(<>
+          <div style={{ fontSize:'18px',fontWeight:800,marginBottom:'12px',letterSpacing:'-.5px' }}>{showPfDetail.title}</div>
+          {showPfDetail.description&&<div style={{ fontSize:'13px',color:'#666',lineHeight:1.7,marginBottom:'14px',whiteSpace:'pre-wrap' }}>{showPfDetail.description}</div>}
+          {showPfDetail.tech_stack&&(
+            <div style={{ marginBottom:'14px' }}>
+              <div style={{ fontSize:'12px',fontWeight:700,marginBottom:'8px' }}>기술 스택</div>
+              <div style={{ display:'flex',flexWrap:'wrap',gap:'6px' }}>
+                {showPfDetail.tech_stack.split(',').map((t,i)=>(<span key={i} style={{ padding:'5px 12px',borderRadius:'8px',background:'#E8F2FF',fontSize:'12px',color:'#007AFF',fontWeight:600 }}>{t.trim()}</span>))}
+              </div>
+            </div>
+          )}
+          <div style={{ display:'flex',flexDirection:'column',gap:'8px',marginBottom:'16px' }}>
+            {showPfDetail.github_url&&<a href={showPfDetail.github_url} target="_blank" rel="noopener noreferrer" style={{ padding:'12px 16px',borderRadius:'12px',background:'#1A1A1A',color:'#FFF',fontSize:'13px',fontWeight:600,textDecoration:'none',textAlign:'center' }}>GitHub 보기</a>}
+            {showPfDetail.deploy_url&&<a href={showPfDetail.deploy_url} target="_blank" rel="noopener noreferrer" style={{ padding:'12px 16px',borderRadius:'12px',background:G,color:'#FFF',fontSize:'13px',fontWeight:600,textDecoration:'none',textAlign:'center' }}>배포 사이트 보기</a>}
+          </div>
+          <div style={{ display:'flex',gap:'8px' }}><BtnG onClick={()=>editPf(showPfDetail)} style={{ flex:1 }}>수정</BtnG><BtnR onClick={()=>delPf(showPfDetail.id)} style={{ flex:1 }}>삭제</BtnR></div>
         </>)}
       </Modal>
     </div>
   )
 }
-
