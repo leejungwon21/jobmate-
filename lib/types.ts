@@ -25,3 +25,13 @@ export interface SavedAnswer {
   tags: string | null
   created_at: string
 }
+
+export interface Portfolio {
+  id: string
+  title: string
+  description: string
+  tech_stack: string
+  github_url: string | null
+  deploy_url: string | null
+  created_at: string
+}

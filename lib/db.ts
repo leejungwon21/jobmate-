@@ -83,3 +83,29 @@ export async function deleteSavedAnswer(id: string): Promise<boolean> {
   if (error) { console.error('deleteSavedAnswer error:', error); return false }
   return true
 }
+
+/* ── Portfolios ── */
+
+export async function getPortfolios(): Promise<Portfolio[]> {
+  const { data, error } = await supabase.from('portfolios').select('*').order('created_at', { ascending: false })
+  if (error) { console.error('getPortfolios error:', error); return [] }
+  return data || []
+}
+
+export async function createPortfolio(p: Omit<Portfolio, 'id' | 'created_at'>): Promise<Portfolio | null> {
+  const { data, error } = await supabase.from('portfolios').insert([p]).select().single()
+  if (error) { console.error('createPortfolio error:', error); return null }
+  return data
+}
+
+export async function updatePortfolio(id: string, p: Partial<Portfolio>): Promise<Portfolio | null> {
+  const { data, error } = await supabase.from('portfolios').update(p).eq('id', id).select().single()
+  if (error) { console.error('updatePortfolio error:', error); return null }
+  return data
+}
+
+export async function deletePortfolio(id: string): Promise<boolean> {
+  const { error } = await supabase.from('portfolios').delete().eq('id', id)
+  if (error) { console.error('deletePortfolio error:', error); return false }
+  return true
+}
